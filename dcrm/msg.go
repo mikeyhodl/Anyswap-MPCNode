@@ -714,12 +714,16 @@ func (self *RecvMsg) Run(workid int, ch chan interface{}) bool {
 		    ys := secp256k1.S256().Marshal(sd.Pkx, sd.Pky)
 		    pubkeyhex := hex.EncodeToString(ys)
 		    pub := Keccak256Hash([]byte(strings.ToLower(pubkeyhex + ":" + sd.GroupId))).Hex()
-		    pre := GetPrePubDataBak(pub,sd.PickKey)
-		    if pre == nil {
-			log.Error("[SIGN] get pre-sign data fail","key",sd.MsgPrex,"sub-key",sd.Key,"picked key",sd.PickKey,"pre-sign pubkey",pubkeyhex,"pre-sign gid",sd.GroupId,"group nodes",getGroupNodes(sd.GroupId),"unsign tx hash",sd.Txhash)
-			res2 := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get pre sign data fail")}
-			ch <- res2
-			return false
+		    
+		    var pre *PrePubData
+		    if sd.Keytype != "ED25519" {
+			pre = GetPrePubDataBak(pub,sd.PickKey)
+			if pre == nil {
+			    log.Error("[SIGN] get pre-sign data fail","key",sd.MsgPrex,"sub-key",sd.Key,"picked key",sd.PickKey,"pre-sign pubkey",pubkeyhex,"pre-sign gid",sd.GroupId,"group nodes",getGroupNodes(sd.GroupId),"unsign tx hash",sd.Txhash)
+			    res2 := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get pre sign data fail")}
+			    ch <- res2
+			    return false
+			}
 		    }
 
 		    w := workers[workid]
@@ -875,6 +879,17 @@ func HandleC1Data(ac *AcceptReqAddrData,key string,workid int) {
 	for _, node := range nodes {
 	    node2 := ParseNode(node)
 		c1data := key + "-" + node2 + common.Sep + "C1" 
+		c1, exist := C1Data.ReadMap(strings.ToLower(c1data))
+		if exist {
+		    DisMsg(c1.(string))
+		    go C1Data.DeleteMap(strings.ToLower(c1data))
+		}
+    }
+
+    // ED
+	for _, node := range nodes {
+	    node2 := ParseNode(node)
+		c1data := key + "-" + node2 + common.Sep + "EDC21" 
 		c1, exist := C1Data.ReadMap(strings.ToLower(c1data))
 		if exist {
 		    DisMsg(c1.(string))
@@ -1446,7 +1461,7 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 			return err
 		    }
 
-		    ac := &AcceptReqAddrData{Initiator:sender,Account: from, Cointype: "ALL", GroupId: req.GroupId, Nonce: nonce, LimitNum: req.ThresHold, Mode: req.Mode, TimeStamp: req.TimeStamp, Deal: "false", Accept: "false", Status: "Pending", PubKey: "", Tip: "", Error: "", AllReply: ars, WorkId: workid,Sigs:sigs}
+		    ac := &AcceptReqAddrData{Initiator:sender,Account: from, Cointype: req.Keytype, GroupId: req.GroupId, Nonce: nonce, LimitNum: req.ThresHold, Mode: req.Mode, TimeStamp: req.TimeStamp, Deal: "false", Accept: "false", Status: "Pending", PubKey: "", Tip: "", Error: "", AllReply: ars, WorkId: workid,Sigs:sigs}
 		    err = SaveAcceptReqAddrData(ac)
 		   if err == nil {
 			log.Info("[KEYGEN] save data to be approved","from",from,"key",key,"raw data hash",hash)
@@ -1482,7 +1497,7 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 					agreeWaitTimeOut := time.NewTicker(agreeWaitTime)
 					if wid < 0 || wid >= len(workers) || workers[wid] == nil {
 						ars := GetAllReplyFromGroup(w.id,req.GroupId,Rpc_REQADDR,sender)	
-						_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId, nonce, req.ThresHold, req.Mode, "false", "false", "Failure", "", "workid error", "workid error", ars, wid,"")
+						_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId, nonce, req.ThresHold, req.Mode, "false", "false", "Failure", "", "workid error", "workid error", ars, wid,"")
 						if err != nil {
 						    tip = "accept reqaddr error"
 						    reply = false
@@ -1514,7 +1529,7 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 
 							if !reply {
 								tip = "don't accept req addr"
-								_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId,nonce, req.ThresHold, req.Mode, "false", "false", "Failure", "", "don't accept req addr", "don't accept req addr", ars, wid,"")
+								_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId,nonce, req.ThresHold, req.Mode, "false", "false", "Failure", "", "don't accept req addr", "don't accept req addr", ars, wid,"")
 								if err != nil {
 								    tip = "don't accept req addr and accept reqaddr error"
 								    timeout <- true
@@ -1522,7 +1537,7 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 								}
 							} else {
 								tip = ""
-								_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId,nonce, req.ThresHold, req.Mode, "false", "true", "Pending", "", "", "", ars, wid,"")
+								_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId,nonce, req.ThresHold, req.Mode, "false", "true", "Pending", "", "", "", ars, wid,"")
 								if err != nil {
 								    tip = "accept reqaddr error"
 								    timeout <- true
@@ -1541,7 +1556,7 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 							}
 
 							//bug: if self not accept and timeout
-							_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId, nonce, req.ThresHold, req.Mode, "false", "false", "Timeout", "", "get other node accept req addr result timeout", "get other node accept req addr result timeout", ars, wid,"")
+							_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId, nonce, req.ThresHold, req.Mode, "false", "false", "Timeout", "", "get other node accept req addr result timeout", "get other node accept req addr result timeout", ars, wid,"")
 							if err != nil {
 							    tip = "get other node accept req addr result timeout and accept reqaddr fail"
 							    reply = false
@@ -1572,9 +1587,9 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 				if !reply {
 					log.Error("[KEYGEN] get approval replies from all nodes in the group,not all agree,keygen fail","raw data hash",hash,"key",key,"replies",ars)
 					if tip == "get other node accept req addr result timeout" {
-						_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId, nonce, req.ThresHold, req.Mode, "false", "", "Timeout", "", tip, "don't accept req addr.", ars, workid,"")
+						_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId, nonce, req.ThresHold, req.Mode, "false", "", "Timeout", "", tip, "don't accept req addr.", ars, workid,"")
 					} else {
-						_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId, nonce, req.ThresHold, req.Mode, "false", "", "Failure", "", tip, "don't accept req addr.", ars, workid,"")
+						_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId, nonce, req.ThresHold, req.Mode, "false", "", "Failure", "", tip, "don't accept req addr.", ars, workid,"")
 					}
 
 					if err != nil {
@@ -1593,7 +1608,7 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 				}
 
 				ars := GetAllReplyFromGroup(w.id,req.GroupId,Rpc_REQADDR,sender)
-				_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId,nonce, req.ThresHold, req.Mode, "false", "true", "Pending", "", "", "", ars, workid,"")
+				_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId,nonce, req.ThresHold, req.Mode, "false", "true", "Pending", "", "", "", ars, workid,"")
 				if err != nil {
 				    res := RpcDcrmRes{Ret:"", Tip: err.Error(), Err: err}
 				    ch <- res
@@ -1601,12 +1616,12 @@ func InitAcceptData(raw string,workid int,sender string,ch chan interface{}) err
 				}
 			}
 
-			dcrm_genPubKey(w.sid, from, "ALL", rch, req.Mode, nonce)
+			dcrm_genPubKey(w.sid, from, req.Keytype, rch, req.Mode, nonce)
 			chret, tip, cherr := GetChannelValue(waitall, rch)
 			if cherr != nil {
 				log.Error("[KEYGEN] keygen fail","err",cherr,"key",key,"raw data hash",hash)
 				ars := GetAllReplyFromGroup(w.id,req.GroupId,Rpc_REQADDR,sender)
-				_,err = AcceptReqAddr(sender,from, "ALL", req.GroupId, nonce, req.ThresHold, req.Mode, "false", "", "Failure", "", tip, cherr.Error(), ars, workid,"")
+				_,err = AcceptReqAddr(sender,from, req.Keytype, req.GroupId, nonce, req.ThresHold, req.Mode, "false", "", "Failure", "", tip, cherr.Error(), ars, workid,"")
 				if err != nil {
 				    res := RpcDcrmRes{Ret:"", Tip:err.Error(), Err:err}
 				    ch <- res
@@ -2760,90 +2775,79 @@ func DisMsg(msg string) {
 			w.bedcfsb <- true
 		}
 	case "EDC21":
-		///bug
-		if w.msg_edc21.Len() >= w.NodeCnt {
+
+		if w.msg_edc21.Len() >= w.ThresHold {
 			return
 		}
-		///
 		if Find(w.msg_edc21, msg) {
 			return
 		}
 
 		w.msg_edc21.PushBack(msg)
-		if w.msg_edc21.Len() == w.NodeCnt {
+		if w.msg_edc21.Len() == w.ThresHold {
 			w.bedc21 <- true
 		}
 	case "EDZKR":
-		///bug
-		if w.msg_edzkr.Len() >= w.NodeCnt {
+		
+		if w.msg_edzkr.Len() >= w.ThresHold {
 			return
 		}
-		///
 		if Find(w.msg_edzkr, msg) {
 			return
 		}
 
 		w.msg_edzkr.PushBack(msg)
-		if w.msg_edzkr.Len() == w.NodeCnt {
+		if w.msg_edzkr.Len() == w.ThresHold {
 			w.bedzkr <- true
 		}
 	case "EDD21":
-		///bug
-		if w.msg_edd21.Len() >= w.NodeCnt {
+		if w.msg_edd21.Len() >= w.ThresHold {
 			return
 		}
-		///
 		if Find(w.msg_edd21, msg) {
 			return
 		}
 
 		w.msg_edd21.PushBack(msg)
-		if w.msg_edd21.Len() == w.NodeCnt {
+		if w.msg_edd21.Len() == w.ThresHold {
 			w.bedd21 <- true
 		}
 	case "EDC31":
-		///bug
-		if w.msg_edc31.Len() >= w.NodeCnt {
+		if w.msg_edc31.Len() >= w.ThresHold {
 			return
 		}
-		///
 		if Find(w.msg_edc31, msg) {
 			return
 		}
 
 		w.msg_edc31.PushBack(msg)
-		if w.msg_edc31.Len() == w.NodeCnt {
+		if w.msg_edc31.Len() == w.ThresHold {
 			w.bedc31 <- true
 		}
 	case "EDD31":
-		///bug
-		if w.msg_edd31.Len() >= w.NodeCnt {
+		if w.msg_edd31.Len() >= w.ThresHold {
 			return
 		}
-		///
 		if Find(w.msg_edd31, msg) {
 			return
 		}
 
 		w.msg_edd31.PushBack(msg)
-		if w.msg_edd31.Len() == w.NodeCnt {
+		if w.msg_edd31.Len() == w.ThresHold {
 			w.bedd31 <- true
 		}
 	case "EDS":
-		///bug
-		if w.msg_eds.Len() >= w.NodeCnt {
+		if w.msg_eds.Len() >= w.ThresHold {
 			return
 		}
-		///
 		if Find(w.msg_eds, msg) {
 			return
 		}
 
 		w.msg_eds.PushBack(msg)
-		if w.msg_eds.Len() == w.NodeCnt {
+		if w.msg_eds.Len() == w.ThresHold {
 			w.beds <- true
 		}
-		///////////////////
 	default:
 		fmt.Println("unkown msg code")
 	}

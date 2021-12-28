@@ -164,7 +164,7 @@ func init() {
 	memo = flag.String("memo", "smpcwallet.com", "Memo")
 	accept = flag.String("accept", "AGREE", "AGREE|DISAGREE")
 	key = flag.String("key", "", "Accept key")
-	keyType = flag.String("keytype", "ECDSA", "ECDSA|ED25519")
+	keyType = flag.String("keytype", "EC256K1", "EC256K1|ED25519")
 	pubkey = flag.String("pubkey", "", "Dcrm pubkey")
 	//msghash = flag.String("msghash", "", "msghash=Keccak256(unsignTX)")
 	pkey := flag.String("pkey", "", "Private key")
@@ -313,6 +313,7 @@ func reqDcrmAddr() {
 	timestamp := strconv.FormatInt((time.Now().UnixNano() / 1e6), 10)
 	txdata := reqAddrData{
 		TxType:    *cmd,
+		Keytype:   *keyType,
 		GroupID:   *gid,
 		ThresHold: *ts,
 		Mode:      *mode,
@@ -1235,6 +1236,7 @@ type groupInfo struct {
 }
 type reqAddrData struct {
 	TxType    string `json:"TxType"`
+	Keytype    string `json:"Keytype"`
 	GroupID   string `json:"GroupId"`
 	ThresHold string `json:"ThresHold"`
 	Mode      string `json:"Mode"`

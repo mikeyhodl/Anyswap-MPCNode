@@ -30,7 +30,6 @@ import (
 	"encoding/json"
 	"sync"
 	"github.com/fsn-dev/cryptoCoins/coins"
-	"github.com/fsn-dev/cryptoCoins/coins/types"
 	"github.com/fsn-dev/dcrm-walletService/mpcdsa/crypto/ec2"
 	"github.com/fsn-dev/dcrm-walletService/mpcdsa/crypto/ed"
 	"github.com/fsn-dev/dcrm-walletService/mpcdsa/ecdsa/keygen"
@@ -98,6 +97,7 @@ func SetReqAddrNonce(account string, nonce string) (string, error) {
 
 type TxDataReqAddr struct {
     TxType string
+    Keytype  string
     GroupId string
     ThresHold string
     Mode string
@@ -258,7 +258,7 @@ func GetCurNodeReqAddrInfo(geter_acc string) ([]*ReqAddrReply, string, error) {
 
 //ec2
 //msgprex = hash
-func dcrm_genPubKey(msgprex string, account string, cointype string, ch chan interface{}, mode string, nonce string) {
+func dcrm_genPubKey(msgprex string, account string, keytype string, ch chan interface{}, mode string, nonce string) {
 
 	wk, err := FindWorker(msgprex)
 	if err != nil || wk == nil {
@@ -270,14 +270,14 @@ func dcrm_genPubKey(msgprex string, account string, cointype string, ch chan int
 
 	cur_enode = GetSelfEnode()
 
-	if types.IsDefaultED25519(cointype) {
+	if keytype == "ED25519" {
 		ok2 := false
 		for j := 0;j < recalc_times;j++ { //try 20 times
 		    if len(ch) != 0 {
 			<-ch
 		    }
 
-		    ok2 = KeyGenerate_ed(msgprex, ch, id, cointype)
+		    ok2 = KeyGenerate_ed(msgprex, ch, id, keytype)
 		    if ok2 {
 			break
 		    }
@@ -331,14 +331,14 @@ func dcrm_genPubKey(msgprex string, account string, cointype string, ch chan int
 			return
 		}
 
-		tip, reply := AcceptReqAddr("",account, cointype, wk.groupid, nonce, wk.limitnum, mode, "true", "true", "Success", pubkeyhex, "", "", nil, id,"")
+		tip, reply := AcceptReqAddr("",account, keytype, wk.groupid, nonce, wk.limitnum, mode, "true", "true", "Success", pubkeyhex, "", "", nil, id,"")
 		if reply != nil {
 			res := RpcDcrmRes{Ret: "", Tip: tip, Err: fmt.Errorf("update keygen status error")}
 			ch <- res
 			return
 		}
 
-		if !strings.EqualFold(cointype, "ALL") {
+		/*if !strings.EqualFold(cointype, "ALL") {
 			h := coins.NewCryptocoinHandler(cointype)
 			if h == nil {
 				res := RpcDcrmRes{Ret: "", Tip: "cointype is not supported", Err: fmt.Errorf("keygen fail,cointype is not supported")}
@@ -364,7 +364,7 @@ func dcrm_genPubKey(msgprex string, account string, cointype string, ch chan int
 			SkU1Chan <- sk
 			sk = KeyData{Key: []byte(key), Data: sedsku1}
 			SkU1Chan <- sk
-		} else {
+		} else*/ {
 			kd := KeyData{Key: sedpk[:], Data: ss}
 			PubKeyDataChan <- kd
 			
@@ -405,7 +405,7 @@ func dcrm_genPubKey(msgprex string, account string, cointype string, ch chan int
 		<-ch
 	    }
 
-	    ok = KeyGenerate_DECDSA(msgprex, ch, id, cointype)
+	    ok = KeyGenerate_DECDSA(msgprex, ch, id, keytype)
 	    if ok {
 		break
 	    }
@@ -473,14 +473,14 @@ func dcrm_genPubKey(msgprex string, account string, cointype string, ch chan int
 		return
 	}
 
-	tip, reply := AcceptReqAddr("",account, cointype, wk.groupid, nonce, wk.limitnum, mode, "true", "true", "Success", pubkeyhex, "", "", nil, id,"")
+	tip, reply := AcceptReqAddr("",account, keytype, wk.groupid, nonce, wk.limitnum, mode, "true", "true", "Success", pubkeyhex, "", "", nil, id,"")
 	if reply != nil {
 		res := RpcDcrmRes{Ret: "", Tip: tip, Err: fmt.Errorf("update keygen status error")}
 		ch <- res
 		return
 	}
 
-	if !strings.EqualFold(cointype, "ALL") {
+	/*if !strings.EqualFold(cointype, "ALL") {
 		h := coins.NewCryptocoinHandler(cointype)
 		if h == nil {
 			res := RpcDcrmRes{Ret: "", Tip: "cointype is not supported", Err: fmt.Errorf("cointype is not supported.")}
@@ -504,7 +504,7 @@ func dcrm_genPubKey(msgprex string, account string, cointype string, ch chan int
 		
 		sk = KeyData{Key: []byte(key), Data: sku1}
 		SkU1Chan <- sk
-	} else {
+	} else*/ {
 		kd := KeyData{Key: ys, Data: ss}
 		PubKeyDataChan <- kd
 
@@ -762,7 +762,6 @@ func KeyGenerate_ed(msgprex string, ch chan interface{}, id int, cointype string
 	for _, id := range ids {
 		enodes := GetEnodesByUid(id, cointype, GroupId)
 		en := strings.Split(string(enodes[8:]), "@")
-		//num,_ := new(big.Int).SetString(fixid[k],10)
 		var t [32]byte
 		//copy(t[:], num.Bytes())
 		copy(t[:], id.Bytes())

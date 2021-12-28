@@ -328,6 +328,11 @@ func CheckRaw(raw string) (string,string,string,interface{},error) {
     req := TxDataReqAddr{}
     err = json.Unmarshal(tx.Data(), &req)
     if err == nil && req.TxType == "REQDCRMADDR" {
+	keytype := req.Keytype 
+	if keytype != "EC256K1" && keytype != "ED25519" {
+		return "","","",nil,fmt.Errorf("invalid keytype")
+	}
+
 	groupid := req.GroupId 
 	if groupid == "" {
 		return "","","",nil,fmt.Errorf("invalid group ID")
@@ -378,7 +383,7 @@ func CheckRaw(raw string) (string,string,string,interface{},error) {
 	    return "","","",nil,fmt.Errorf("duplicate nodes in group")
 	}
 	
-	key := Keccak256Hash([]byte(strings.ToLower(from.Hex() + ":" + "ALL" + ":" + groupid + ":" + fmt.Sprintf("%v", Nonce) + ":" + threshold + ":" + mode))).Hex()
+	key := Keccak256Hash([]byte(strings.ToLower(from.Hex() + ":" + keytype + ":" + groupid + ":" + fmt.Sprintf("%v", Nonce) + ":" + threshold + ":" + mode))).Hex()
 
 	return key,from.Hex(),fmt.Sprintf("%v", Nonce),&req,nil
     }
@@ -397,6 +402,10 @@ func CheckRaw(raw string) (string,string,string,interface{},error) {
 
 	if from.Hex() == "" || pubkey == "" || hash == nil || keytype == "" || groupid == "" || threshold == "" || mode == "" || timestamp == "" {
 		return "","","",nil,fmt.Errorf("param error from raw data.")
+	}
+
+	if keytype != "EC256K1" && keytype != "ED25519" {
+		return "","","",nil,fmt.Errorf("invalid keytype")
 	}
 
 	nums := strings.Split(threshold, "/")
@@ -1401,28 +1410,28 @@ func GetChannelValue(t int, obj interface{}) (string, string, error) {
 				return ret.Ret, ret.Tip, ret.Err
 			}
 		case <-timeout:
-			return "", "dcrm back-end internal error:get result from channel timeout", fmt.Errorf("get data from node fail.")
+			return "", "", fmt.Errorf("get RpcDcrmRes result fail")
 		}
 	case chan string:
 		select {
 		case v := <-ch:
 			return v, "", nil
 		case <-timeout:
-			return "", "dcrm back-end internal error:get result from channel timeout", fmt.Errorf("get data from node fail.")
+			return "", "", fmt.Errorf("get string result fail")
 		}
 	case chan int64:
 		select {
 		case v := <-ch:
 			return strconv.Itoa(int(v)), "", nil
 		case <-timeout:
-			return "", "dcrm back-end internal error:get result from channel timeout", fmt.Errorf("get data from node fail.")
+			return "", "", fmt.Errorf("get int64 result fail")
 		}
 	case chan int:
 		select {
 		case v := <-ch:
 			return strconv.Itoa(v), "", nil
 		case <-timeout:
-			return "", "dcrm back-end internal error:get result from channel timeout", fmt.Errorf("get data from node fail.")
+			return "", "", fmt.Errorf("get int result fail")
 		}
 	case chan bool:
 		select {
@@ -1433,13 +1442,13 @@ func GetChannelValue(t int, obj interface{}) (string, string, error) {
 				return "true", "", nil
 			}
 		case <-timeout:
-			return "", "dcrm back-end internal error:get result from channel timeout", fmt.Errorf("get data from node fail.")
+			return "", "", fmt.Errorf("get bool result fail")
 		}
 	default:
-		return "", "dcrm back-end internal error:unknown channel type", fmt.Errorf("unknown ch type.")
+		return "", "unknown channel type", fmt.Errorf("unknown ch type")
 	}
 
-	return "", "dcrm back-end internal error:unknown error.", fmt.Errorf("get value fail.")
+	return "", "unknown error", fmt.Errorf("unknown error")
 }
 
 //error type 1

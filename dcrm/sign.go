@@ -34,7 +34,6 @@ import (
 	"github.com/fsn-dev/dcrm-walletService/crypto/sha3"
 
 	"sync"
-	"github.com/fsn-dev/cryptoCoins/coins/types"
 	"github.com/fsn-dev/dcrm-walletService/internal/common"
 	"container/list"
 	"github.com/fsn-dev/dcrm-walletService/p2p/discover"
@@ -97,27 +96,30 @@ func InitAcceptData2(sbd *SignBrocastData,workid int,sender string,ch chan inter
 	    pub := Keccak256Hash([]byte(strings.ToLower(sig.PubKey + ":" + sig.GroupId))).Hex()
 	   if !strings.EqualFold(sender,cur_enode) {
 	       DtPreSign.Lock()
-		/////check pre-sign data
-		for _,vv := range sbd.PickHash {
-		   err = PickPrePubDataByKey(pub,vv.PickKey)
-		   if err != nil {
-			log.Error("[SIGN] picking pre-sign data by pick-key fail","txhash",vv.Hash,"pick-key",vv.PickKey,"key",key,"err",err,"pre-sign pubkey",sig.PubKey,"pre-sign gid",sig.GroupId,"from",from,"raw data hash",hash,"tx data",txdata,"sender's enode ID",sender,"pre-sign group nodes",getGroupNodes(sig.GroupId))
-			res := RpcDcrmRes{Ret: "", Tip: "", Err: errors.New("picking pre-sign data by pick-key fail")}
-			ch <- res
-			DtPreSign.Unlock()
-			return errors.New("picking pre-sign data by pick-key fail")
-		   }
+	       // don't check pre-sign data in ed 
+	       if sig.Keytype != "ED25519" {
+		    /////check pre-sign data
+		    for _,vv := range sbd.PickHash {
+		       err = PickPrePubDataByKey(pub,vv.PickKey)
+		       if err != nil {
+			    log.Error("[SIGN] picking pre-sign data by pick-key fail","txhash",vv.Hash,"pick-key",vv.PickKey,"key",key,"err",err,"pre-sign pubkey",sig.PubKey,"pre-sign gid",sig.GroupId,"from",from,"raw data hash",hash,"tx data",txdata,"sender's enode ID",sender,"pre-sign group nodes",getGroupNodes(sig.GroupId))
+			    res := RpcDcrmRes{Ret: "", Tip: "", Err: errors.New("picking pre-sign data by pick-key fail")}
+			    ch <- res
+			    DtPreSign.Unlock()
+			    return errors.New("picking pre-sign data by pick-key fail")
+		       }
 
-		    err = DeletePreSignDataFromDb(strings.ToLower(pub),vv.PickKey)
-		    if err != nil {
-			log.Error("[SIGN] delete pre-sign data from db fail","txhash",vv.Hash,"pick-key",vv.PickKey,"key",key,"err",err,"pre-sign pubkey",sig.PubKey,"pre-sign gid",sig.GroupId,"from",from,"raw data hash",hash,"tx data",txdata,"sender's enode ID",sender,"pre-sign group nodes",getGroupNodes(sig.GroupId))
-			res := RpcDcrmRes{Ret: "", Tip: "", Err: errors.New("delete pre-sign data from db fail")}
-			ch <- res
-			DtPreSign.Unlock()
-			return errors.New("delete pre-sign data from db fail")
+			err = DeletePreSignDataFromDb(strings.ToLower(pub),vv.PickKey)
+			if err != nil {
+			    log.Error("[SIGN] delete pre-sign data from db fail","txhash",vv.Hash,"pick-key",vv.PickKey,"key",key,"err",err,"pre-sign pubkey",sig.PubKey,"pre-sign gid",sig.GroupId,"from",from,"raw data hash",hash,"tx data",txdata,"sender's enode ID",sender,"pre-sign group nodes",getGroupNodes(sig.GroupId))
+			    res := RpcDcrmRes{Ret: "", Tip: "", Err: errors.New("delete pre-sign data from db fail")}
+			    ch <- res
+			    DtPreSign.Unlock()
+			    return errors.New("delete pre-sign data from db fail")
+			}
 		    }
-		}
-		///////
+		    ///////
+	       }
 		DtPreSign.Unlock()
 	   }
 
@@ -535,7 +537,7 @@ func Sign(raw string) (string, string, error) {
     }
 
     tt := fmt.Sprintf("%v",time.Now().UnixNano()/1e6)
-    rsd := &RpcSignData{Raw:raw,PubKey:sig.PubKey,GroupId:sig.GroupId,MsgHash:sig.MsgHash,Key:key,TimeStamp:tt}
+    rsd := &RpcSignData{Raw:raw,Keytype:sig.Keytype,PubKey:sig.PubKey,GroupId:sig.GroupId,MsgHash:sig.MsgHash,Key:key,TimeStamp:tt}
     SignChan <- rsd
     return key, "", nil
 }
@@ -553,26 +555,32 @@ func HandleRpcSign() {
 				pub := Keccak256Hash([]byte(strings.ToLower(rsd.PubKey + ":" + rsd.GroupId))).Hex()
 				bret := false
 				pickhash := make([]*PickHashKey,0)
+				var pickkey string
 				for _,vv := range rsd.MsgHash {
-				    DtPreSign.Lock()
-					pickkey := PickPrePubData(pub)
-					if pickkey == "" {
+					if rsd.Keytype != "ED25519" {
+					    DtPreSign.Lock()
+					    pickkey = PickPrePubData(pub)
+					    if pickkey == "" {
+						    bret = true
+						    DtPreSign.Unlock()
+						    break
+					    }
+
+					    err := DeletePreSignDataFromDb(strings.ToLower(pub),pickkey)
+					    if err != nil {
+						log.Error("[SIGN] delete pre-sign data from db fail","err",err,"raw data hash",hash)
 						bret = true
 						DtPreSign.Unlock()
 						break
-					}
+					    }
 
-					err := DeletePreSignDataFromDb(strings.ToLower(pub),pickkey)
-					if err != nil {
-					    log.Error("[SIGN] delete pre-sign data from db fail","err",err,"raw data hash",hash)
-					    bret = true
 					    DtPreSign.Unlock()
-					    break
+
+					    log.Info("[SIGN] picking pre-sign data successfully","unsign tx hash",vv,"picked key",pickkey,"raw data hash",hash)
+					} else {
+					    pickkey = ""
 					}
 
-					DtPreSign.Unlock()
-
-					log.Info("[SIGN] picking pre-sign data successfully","unsign tx hash",vv,"picked key",pickkey,"raw data hash",hash)
 					ph := &PickHashKey{Hash:vv,PickKey:pickkey}
 					pickhash = append(pickhash,ph)
 
@@ -640,9 +648,8 @@ type SignStatus struct {
 
 func GetSignStatus(key string) (string, string, error) {
 	exsit,da := GetValueFromPubKeyData(key)
-	///////
 	if !exsit || da == nil {
-		return "", "", fmt.Errorf("No sign result was found in the database","key",key)
+		return "", "", fmt.Errorf("No sign result was found in the database,key = %v",key)
 	}
 
 	ac,ok := da.(*AcceptSignData)
@@ -805,7 +812,7 @@ func sign(wsid string,account string,pubkey string,unsignhash []string,keytype s
 
 	var dcrmpkx *big.Int
 	var dcrmpky *big.Int
-	if keytype == "ECDSA" {
+	if keytype == "EC256K1" {
 		dcrmpks := []byte(dcrmpub)
 		dcrmpkx, dcrmpky = secp256k1.S256().Unmarshal(dcrmpks[:])
 	}
@@ -847,18 +854,16 @@ func sign(wsid string,account string,pubkey string,unsignhash []string,keytype s
 	    result = ret
 	}
 
-	tmps := strings.Split(result, ":")
-	for _,rsv := range tmps {
-	    //if rsv == "NULL" {
-		//continue
-	    //}
-
-	    //bug
-	    rets := []rune(rsv)
-	    if len(rets) != 130 {
-		    res := RpcDcrmRes{Ret: "", Tip: "wrong rsv size", Err: GetRetErr(ErrDcrmSigWrongSize)}
-		    ch <- res
-		    return
+	// check rsv size
+	if keytype != "ED25519" {
+	    tmps := strings.Split(result, ":")
+	    for _,rsv := range tmps {
+		rets := []rune(rsv)
+		if len(rets) != 130 {
+			res := RpcDcrmRes{Ret: "", Tip: "wrong rsv size", Err: GetRetErr(ErrDcrmSigWrongSize)}
+			ch <- res
+			return
+		}
 	    }
 	}
 
@@ -884,6 +889,7 @@ func sign(wsid string,account string,pubkey string,unsignhash []string,keytype s
 
 		tip,reply := AcceptSign("",account,pubkey,unsignhash,keytype,w.groupid,nonce,w.limitnum,mode,"true", "true", "Success", result,"","",nil,w.id)
 		if reply != nil {
+		    	log.Error("[SIGN] update sign status error","key",wsid)
 			res := RpcDcrmRes{Ret: "", Tip: tip, Err: fmt.Errorf("update sign status error")}
 			ch <- res
 			return
@@ -3482,7 +3488,7 @@ func Sign_ec3(msgprex string, message string, cointype string, pkx *big.Int, pky
 
 func DoubleHash(id string, cointype string) *big.Int {
 	
-    	if cointype == "ED25519" || cointype == "ECDSA" {
+    	if cointype == "ED25519" || cointype == "EC256K1" {
 	    return DoubleHash2(id,cointype)
 	}
 
@@ -3505,7 +3511,7 @@ func DoubleHash(id string, cointype string) *big.Int {
 	    return nil
 	}
 
-	if types.IsDefaultED25519(cointype) {
+	if cointype == "ED25519" {
 		var digest [32]byte
 		copy(digest[:], sha3256.Sum(nil))
 
@@ -3645,7 +3651,7 @@ func sign_ed(msgprex string,txhash []string,save string, sku1 *big.Int, pk strin
 	for _,v := range txhash {
 	    txhashs := []rune(v)
 	    if string(txhashs[0:2]) == "0x" {
-		    tmp = append(tmp,string(txhashs[2:]))
+		tmp = append(tmp,string(txhashs[2:]))
 	    } else {
 		tmp = append(tmp,string(txhashs))
 	    }
@@ -3670,8 +3676,8 @@ func sign_ed(msgprex string,txhash []string,save string, sku1 *big.Int, pk strin
 		    <-ch1
 		}
 
-		w := workers[id]
-		w.Clear2()
+		//w := workers[id]
+		//w.Clear2()
 		bak_sig = Sign_ed(msgprex, save, sku1, v, keytype, pk, ch1, id)
 		ret, _, cherr := GetChannelValue(ch_t, ch1)
 		if ret != "" && cherr == nil {
@@ -3715,7 +3721,7 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 	}
 
 	ns, _ := GetGroup(GroupId)
-	if ns != w.NodeCnt {
+	if ns < w.ThresHold {
 		res := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("verify group node count fail")}
 		ch <- res
 		return ""
@@ -3727,10 +3733,17 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 	m := strings.Split(save, common.Sep11)
 
 	var sk [64]byte
-	//va := []byte(m[0])
 	va := sku1.Bytes()
-	copy(sk[:], va[:64])
-	//pk := ([]byte(m[1]))[:]
+	if len(va) < 64 {
+	    diff := 64 - len(va)
+	    for i := 0;i<diff;i++ {
+		sk[i] = byte(0x00)
+	    }
+	    copy(sk[diff:], va[:])
+	} else {
+	    copy(sk[:], va[:64])
+	}
+
 	var tsk [32]byte
 	va = []byte(m[2])
 	copy(tsk[:], va[:32])
@@ -3806,11 +3819,12 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 		return ""
 	}
 
-	if w.msg_edc21.Len() != w.NodeCnt {
+	if w.msg_edc21.Len() != w.ThresHold {
 		res := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get r*G commitment data fail")}
 		ch <- res
 		return ""
 	}
+	
 	var crs = make(map[string][32]byte)
 	for _, id := range idSign {
 		enodes := GetEnodesByUid(id, cointype, GroupId)
@@ -3850,7 +3864,7 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 		return ""
 	}
 
-	if w.msg_edzkr.Len() != w.NodeCnt {
+	if w.msg_edzkr.Len() != w.ThresHold {
 		res := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get r ZK data fail")}
 		ch <- res
 		return ""
@@ -3895,7 +3909,7 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 		return ""
 	}
 
-	if w.msg_edd21.Len() != w.NodeCnt {
+	if w.msg_edd21.Len() != w.ThresHold {
 		res := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get r*G commitment data fail")}
 		ch <- res
 		return ""
@@ -4046,7 +4060,7 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 		return ""
 	}
 
-	if w.msg_edc31.Len() != w.NodeCnt {
+	if w.msg_edc31.Len() != w.ThresHold {
 		res := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get s*G commitment data fail")}
 		ch <- res
 		return ""
@@ -4090,7 +4104,7 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 		return ""
 	}
 
-	if w.msg_edd31.Len() != w.NodeCnt {
+	if w.msg_edd31.Len() != w.ThresHold {
 		res := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get s*G commitment data fail")}
 		ch <- res
 		return ""
@@ -4208,7 +4222,7 @@ func Sign_ed(msgprex string, save string, sku1 *big.Int, message string, cointyp
 		return ""
 	}
 
-	if w.msg_eds.Len() != w.NodeCnt {
+	if w.msg_eds.Len() != w.ThresHold {
 		res := RpcDcrmRes{Ret: "", Tip: "", Err: fmt.Errorf("get s fail")}
 		ch <- res
 		return ""

@@ -43,6 +43,7 @@ var (
 
 type RpcSignData struct {
 	Raw string
+	Keytype string
 	PubKey string
 	GroupId string
 	MsgHash []string
